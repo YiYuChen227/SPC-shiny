@@ -1,0 +1,369 @@
+library(shiny)
+library(rhandsontable)
+source("global.R",encoding = "UTF-8")
+Sys.setlocale(locale = "zh_TW.UTF8")
+
+shinyServer(function(input, output, session) {
+  
+  output$sMold<-renderUI({
+    selectInput("sMold", label="選擇模具版本:", choices = product$MoldVersion[product$Product==input$sProduct])
+  })
+  
+  observeEvent(input$sMold,{
+    if(grepl("V", input$sMold)){Type="CP"}else{Type="WP"}
+    updateSelectInput(session, "sTitle1", label="選擇觀測尺寸:", choices = type$TITLE[type$Type==Type])
+    updateSelectInput(session, "sTitle2", label="選擇觀測尺寸:", choices = type$TITLE[type$Type==Type])
+    updateSelectInput(session, "sTitle3", label="選擇觀測尺寸:", choices = type$TITLE[type$Type==Type])
+    updateSelectInput(session, "sTitle4", label="選擇觀測尺寸:", choices = type$TITLE[type$Type==Type])
+  })
+
+  ####上排資訊----
+
+  observeEvent(input$cpktable, {
+    showModal(modalDialog(
+      title = "CPK對應表",
+      renderTable({cpkTable}),
+      easyClose = TRUE
+    ))
+  })
+  
+  observeEvent(input$cptable, {
+    showModal(modalDialog(
+      title = "CPK對應表",
+      renderTable({cpkTable}),
+      easyClose = TRUE
+    ))
+  })
+  
+  observeEvent(input$confirm, {
+    if(grepl("V", input$sMold)){
+      warning <- SQL_warning("CP", input$sProduct, input$sMold)
+    }else{
+      warning <- SQL_warning("WP", input$sProduct, input$sMold)
+    }
+    type <- warning$type
+    warning_all <- warning$warning_all
+    spec <- warning$spec
+    output$cpk_warning<-DT::renderDataTable({DT::datatable(CpkWarning(warning_all, type), rownames=FALSE, options = list(dom = 't', scrollX = TRUE))})
+
+    output$target_warning<-DT::renderDataTable({DT::datatable(TargetWarning(warning_all, spec), rownames=FALSE, options = list(dom = 't', scrollX = TRUE))})
+  
+    output$yield_warning<-DT::renderDataTable({DT::datatable(YieldWarning(warning_all, type), rownames=FALSE, options = list(dom = 't', scrollX = TRUE))})
+    
+  })
+  
+  
+
+  
+  
+  
+  ####mail alert
+  # observeEvent(input$send_cpk,{
+  #   send.mail(from = "yiu0227@ie.nthu.edu.tw",
+  #             to = "yiu227227@gmail.com",
+  #             subject=paste0("CPK alarm",Sys.time()),
+  #             body ="Cpk Warning",
+  #             smtp = list(host.name = "smtp.gmail.com", port = 465,
+  #                         user.name="yiu0227@ie.nthu.edu.tw", passwd="cathy0227", ssl = TRUE),
+  #             authenticate = TRUE,
+  #             send = TRUE,
+  #             attach.files = c("cpk warning.csv")
+  #   )
+  # })
+  # 
+  # observeEvent(input$send_target,{
+  #   send.mail(from = "yiu0227@ie.nthu.edu.tw",
+  #             to = "yiu227227@gmail.com",
+  #             subject=paste0("Target alarm",Sys.time()),
+  #             body ="Target Warning",
+  #             smtp = list(host.name = "smtp.gmail.com", port = 465,
+  #                         user.name="yiu0227@ie.nthu.edu.tw", passwd="cathy0227", ssl = TRUE),
+  #             authenticate = TRUE,
+  #             send = TRUE,
+  #             attach.files = c("target warning.csv")
+  #   )
+  # })
+  # 
+  # observeEvent(input$send_yield,{
+  #   send.mail(from = "yiu0227@ie.nthu.edu.tw",
+  #             to = "yiu227227@gmail.com",
+  #             subject=paste0("Yield alarm",Sys.time()),
+  #             body ="Yield Warning",
+  #             smtp = list(host.name = "smtp.gmail.com", port = 465,
+  #                         user.name="yiu0227@ie.nthu.edu.tw", passwd="cathy0227", ssl = TRUE),
+  #             authenticate = TRUE,
+  #             send = TRUE,
+  #             attach.files = c("yield warning.csv")
+  #   )
+  # })
+  
+  ####短期圖-----
+  
+  
+  output$short_layout_UI<-renderUI({
+    if(input$confirm==0){
+      HTML("<font color=\"#ff0000\"><font size=\"6\"><b>Please Click confirm button</b></font>")
+    }else if(grepl("V", input$sMold)){
+      uiOutput("short_layout_V")
+    }else{
+      uiOutput("short_layout_E")
+    }
+  })
+  
+  
+  output$short_layout_V<-renderUI({
+    input$confirm #for trigger to re-plot
+    layout <- isolate({
+      short_chart <- SQL_short(input$sProduct, input$sMold)
+      short <- short_chart$short
+      spec <- short_chart$spec
+      withProgress(message = 'Control chart in progress',detail = "This may take a while", value = 0, {
+        fluidPage(
+          fluidRow(
+            column(4, short_control_chart("A(offset)", short, spec, plot_num=19)),
+            column(4, short_control_chart("C(Bending length)", short, spec, plot_num=19)),
+            column(4, short_control_chart("D(Tail length)", short, spec,plot_num=19))
+          ),
+          fluidRow(
+            column(4, short_control_chart("B(Tip length)", short, spec,plot_num=19)),
+            column(4, short_control_chart("C+D(Bending+tail)", short, spec,plot_num=19)),
+            column(4, short_control_chart("G(angle)", short, spec,plot_num=19))
+          ),
+          fluidRow(
+            column(4, short_control_chart("straight X", short, spec,plot_num=19)),
+            column(4, short_control_chart("膝高度寬", short, spec,plot_num=19)),
+            column(4, short_control_chart("K(Tip deg)", short, spec,plot_num=19))
+          ),
+          fluidRow(
+            column(4, short_control_chart("N(needle-dia center tolerance) 針徑偏心", short, spec,plot_num=19)),
+            column(4, short_control_chart("M(conical circular runout  tolerance )針尖端偏擺", short, spec,plot_num=19)),
+            column(4, short_control_chart("O(TIP直度)", short, spec,plot_num=19))
+          ),
+          fluidRow(
+            column(4, short_control_chart("H1 X", short, spec,plot_num=19)),
+            column(4, short_control_chart("H2 X", short, spec,plot_num=19)),
+            column(4, short_control_chart("H3 X", short, spec,plot_num=19))
+          ),
+          fluidRow(
+            column(4, short_control_chart("I(扁尾寬)", short, spec,plot_num=19)),
+            column(4, short_control_chart("L(扁尾高)", short, spec,plot_num=19)),
+            column(4, short_control_chart("Tip width", short, spec,plot_num=19))
+          ),
+          fluidRow(
+            column(4, short_control_chart("R(R值)", short, spec,plot_num=19))
+          )
+        )
+      })
+    })
+    layout
+  })
+  
+  output$short_layout_E<-renderUI({
+    input$confirm #for trigger to re-plot
+    layout <- isolate({
+      short_chart <- SQL_short(input$sProduct, input$sMold)
+      short <- short_chart$short
+      spec <- short_chart$spec
+      withProgress(message = 'Control chart in progress',detail = "This may take a while", value = 0, {
+        fluidPage(
+          fluidRow(
+            column(4, short_control_chart("E(Total length)", short, spec,plot_num=10)),
+            column(4, short_control_chart("B(Tip length)", short, spec,plot_num=10)),
+            column(4, short_control_chart("膝高度寬", short, spec,plot_num=10))
+          ),
+          fluidRow(
+            column(4, short_control_chart("Tip width", short, spec,plot_num=10)),
+            column(4, short_control_chart("I(扁尾寬)", short, spec,plot_num=10)),
+            column(4, short_control_chart("L(扁尾高)", short, spec,plot_num=10))
+          ),
+          fluidRow(
+            column(4, short_control_chart("N(needle-dia center tolerance) 針徑偏心", short, spec,plot_num=10)),
+            column(4, short_control_chart("M(conical circular runout  tolerance )針尖端偏擺", short, spec,plot_num=10)),
+            column(4, short_control_chart("K(Tip deg)", short, spec,plot_num=10))
+          ),
+          fluidRow(
+            column(4, short_control_chart("O(TIP直度)", short, spec,plot_num=10))
+          )
+        )
+      })
+    })
+    layout
+  })
+  
+  
+  
+  ####長期圖-----
+  output$long_layout_UI<-renderUI({
+    if(input$long==0){
+      HTML("<font color=\"#ff0000\"><font size=\"6\"><b>Please Click confirm button</b></font>")
+    }else{
+      plotlyOutput("long_layout")
+    }
+  })
+  
+  output$long_layout<-renderPlotly({
+    input$long #for trigger to re-plot
+    layout <- isolate(
+      long_control_chart(input$sProduct, input$sMold, input$sTitle1, input$date_long1)
+    )
+    rangeslider(layout)
+    
+  })
+  
+  ####2SD長期圖-----
+  output$twoStd_layout_UI<-renderUI({
+    if(input$twoStd==0){
+      HTML("<font color=\"#ff0000\"><font size=\"6\"><b>Please Click confirm button</b></font>")
+    }else{
+      plotlyOutput("twoStd_layout")
+    }
+  })
+  
+  output$twoStd_layout<-renderPlotly({
+    input$twoStd #for trigger to re-plot
+    layout <- isolate(
+      twoStd_control_chart(input$sProduct, input$sMold, input$sTitle2, input$date_long2)
+    )
+    layout
+  })
+  
+  ####cpk折線圖-----
+  output$cpk_layout_UI<-renderUI({
+    if(input$cpk==0){
+      HTML("<font color=\"#ff0000\"><font size=\"6\"><b>Please Click confirm button</b></font>")
+    }else{
+      plotlyOutput("cpk_layout")
+    }
+  })
+  
+  output$cpk_layout<-renderPlotly({
+    input$cpk #for trigger to re-plot
+    layout <- isolate(
+      cpk_control_chart(input$sProduct, input$sMold, input$sTitle3, input$date_long3)
+    )
+    rangeslider(layout)
+  })
+  
+  ####良率折線圖-----
+  output$yield_UI<-renderUI({
+    if(input$yield==0){
+      HTML("<font color=\"#ff0000\"><font size=\"6\"><b>Please Click confirm button</b></font>")
+    }else{
+      plotlyOutput("yield_layout")
+    }
+  })
+  
+  output$yield_layout<-renderPlotly({
+    input$yield #for trigger to re-plot
+    layout <- isolate(
+      yield_control_chart(input$sProduct, input$sMold, input$sTitle4, input$date_long4)
+    )
+    layout
+  })
+  
+  
+
+  
+  ####改SPEC
+  ####login
+  USER <- reactiveValues(Logged = FALSE , session = session$user) 
+
+  source("www/Login.R",  local = TRUE)
+  ####user1
+
+  output$table <- renderUI({    
+    if (USER$Logged == TRUE) {      
+      rHandsontableOutput('spec')
+    }
+  })
+  
+  output$spec <- renderRHandsontable(
+    
+    spec<-rhandsontable(data.frame(spec), search = TRUE,digits = 5,width = 1300,height = 600) %>% hot_col("UCL", format = "0.00000") %>% hot_col("LCL", format = "0.00000") %>% hot_col("USL", format = "0.00000") %>% hot_col("LSL", format = "0.00000")
+    %>%hot_col(col="Product",type = "dropdown",source = spec$Product)
+    %>%hot_col(col="TITLE",type = "dropdown",source = spec$TITLE)
+    %>%hot_table(highlightCol = TRUE, highlightRow = TRUE)
+  )
+  output$btn1 <-renderUI({
+    if (USER$Logged == TRUE){
+      downloadButton("saveBtn","Save csv",style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+    }
+  })
+  output$saveBtn <- downloadHandler(
+    filename = "spec.csv",
+    content = function(file) {
+      #Encoding(input$spec["TITLE"])<-"UTF-8"
+      write.csv(hot_to_r(input$spec), file, row.names = FALSE)
+    }
+  )
+  
+  output$btn2 <-renderUI({
+    if (USER$Logged == TRUE){
+      actionButton("saveBtn2","Save MySQL",style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+    }
+  })
+  
+  output$input_table <- renderUI({
+    if (USER$Logged == TRUE){
+      fileInput("file1", "Choose CSV File",
+                multiple = FALSE,
+                accept = c("text/csv",
+                           "text/comma-separated-values,text/plain",
+                           ".csv"))
+    }
+  })
+
+  output$output_table <-renderUI({
+    if (USER$Logged == TRUE){
+      tableOutput("spec_csv")
+    }
+    
+  })
+
+  output$spec_csv  <- renderTable({
+    req(input$file1)
+    
+    df <- read.csv(input$file1$datapath)
+    
+  })
+
+  #  actionButton("save_csv","save csv in spec",style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+    
+
+  
+
+
+  
+  ####save mysql
+  # write_sql<-function(Product,TITLE,unit,UCL,LCL,USL,LSL,sCpk,sYield){
+  # 
+  #        root <- paste("insert into spec(Product,TITLE,unit,UCL,LCL,USL,LSL,sCpk,sYield) values(",
+  #                      "\"",spec()$Product[i],"\",\"",spec()$TITLE[i],"\",\"",
+  #                      spec()$unit[i],"\",",spec()$UCL[i],",",spec()$LCL[i],",",spec()$USL[i],",",spec()$LSL[i],",",
+  #                      spec()$sCpk[i],",",spec()$sYield[i],",")
+  #        db<-dbConnect(MySQL(),dbnametest,hosttest,usernametest,passwordtest)
+  #        dbSendQuery(db,iconv(root,to="UTF-8"))
+  #        dbDisconnect(db)
+  # 
+  # }
+
+  # observe({if(input$saveBtn2==0)return()
+  #   isolate({
+  #     write_sql(Product,TITLE,unit,UCL,LCL,USL,LSL,sCpk,sYield)
+  #   })
+  #   })
+
+
+
+  
+})

@@ -1,0 +1,179 @@
+Sys.setlocale(locale = "zh_TW.UTF8")
+library(shinydashboard)
+library(shiny)
+library(shinyWidgets)
+tags$script('
+            $(document).on("shiny:connected",function(e){
+            var Width = window.screen.width;
+            Shiny.onInputChange("MonitorWidth",Width);})
+            ')
+
+dashboardPage(
+  skin = "purple",
+  dashboardHeader(
+    title = "SPC精密成型與大數據分析", titleWidth = 450 ,
+    tags$li(a(img(src = 'MPI_LOGO.png',title = "MPI", height = "50px"), style = "padding-top:0px; padding-bottom:0px;"),class = "dropdown")
+  ),
+  dashboardSidebar(
+    collapsed =T,
+    sidebarMenu(
+      menuItem("SPC", tabName = "dashboard1", icon = icon("area-chart"))
+    )
+  ),
+  dashboardBody(
+    tags$head(
+      tags$style(
+        HTML(".shiny-notification {
+             height: 100px;
+             width: 800px;
+             position:fixed;
+             top: calc(50% - 50px);
+             left: calc(50% - 400px);
+             font-size: 250%;
+             text-align: center;
+             }
+             "
+        )
+        )
+        ),
+    tags$head(tags$style(HTML(
+      '.myClass { 
+      font-size: 20px;
+      line-height: 50px;
+      text-align: left;
+      font-family: "Helvetica Neue",Helvetica,Arial,sans-serif;
+      padding: 0 15px;
+      overflow: hidden;
+      color: white;
+      }
+      '))),
+    tags$script(HTML('
+                     $(document).ready(function() {
+                     $("header").find("nav").append(\'<span class="myClass"></span>\');
+                     })
+                     ')),
+    tags$head(tags$style(HTML(".small-box {height: 280px}"))),
+    tabItems(
+      tabItem(
+        tabName = "dashboard1",
+
+        shinydashboard::box(
+          width = 6,height=400,
+          title = "Cpk預警表", status = "primary", solidHeader = TRUE,
+          collapsible = F,
+          div(style = 'overflow-y: scroll', DT::dataTableOutput("cpk_warning", height = "250px")),
+          actionButton("cpktable","CPK對應表",style="color: #fff; background-color: #337ab7; border-color: #2e6da4"),
+          actionButton("cptable","CP對應表",style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+
+          
+          
+        ),
+        shinydashboard::box(
+          width = 6,height=400,
+          title = "目標值預警表", status = "primary", solidHeader = TRUE,
+          collapsible = F,
+          div(style = 'overflow-y: scroll', DT::dataTableOutput("target_warning", height = "250px"))
+        ),
+        shinydashboard::box(
+          width = 6,height=400,
+          title = "良率預警表", status = "primary", solidHeader = TRUE,
+          collapsible = F,
+          div(style = 'overflow-y: scroll', DT::dataTableOutput("yield_warning", height = "250px")),
+          paste0("總良率:",round(mean(measure_all$Yield),digits = 2))
+          
+        ),
+        br(),
+        fluidRow(
+          shinydashboard::box(
+            width = 6,
+            title = "資料選取", status = "primary", solidHeader = TRUE,
+            collapsible = TRUE,
+            selectInput("sProduct", label="選擇產品:", choices = unique(product$Product)),
+            uiOutput("sMold"),
+            # selectInput("sTip", label="選擇Tip規格:", choices = list("A"="A","B"="B","C"="C","D"="D"),selected = "B"),
+            conditionalPanel(condition="input.tabset==1",
+                             column(12,align="center",
+                                    actionButton(inputId="confirm",label = "畫短期圖"
+                                                 ,style="color: #fff; background-color: #337ab7; border-color: #2e6da4"
+                                    ))
+            ),
+            conditionalPanel(condition="input.tabset==2"
+                             ,selectInput("sTitle1", label="選擇觀測尺寸:", choices ="")
+                             ,dateRangeInput("date_long1",label = "選擇日期：",start = Sys.Date()-30,end = Sys.Date())
+                             ,column(12,align="center"
+                                     ,actionButton("long", "畫長期圖",style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+                             )
+            ),
+            conditionalPanel(condition="input.tabset==3"
+                             ,selectInput("sTitle2", label="選擇觀測尺寸:", choices ="")
+                             ,dateRangeInput("date_long2",label = "選擇日期：",start = Sys.Date()-30,end = Sys.Date())
+                             ,column(12,align="center"
+                                     ,actionButton("twoStd", "畫兩倍標準差長期圖",style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+                                     
+                             )
+            ),
+            conditionalPanel(condition="input.tabset==4"
+                             ,selectInput("sTitle3", label="選擇觀測尺寸:", choices ="")
+                             ,dateRangeInput("date_long3",label = "選擇日期：",start = Sys.Date()-30,end = Sys.Date())
+                             , column(12,align="center"
+                                      ,actionButton("cpk", "畫Cpk折線圖",style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+                             )
+            ),
+            conditionalPanel(condition="input.tabset==5"
+                             ,selectInput("sTitle4", label="選擇觀測尺寸:", choices ="")
+                             ,dateRangeInput("date_long4",label = "選擇日期：",start = Sys.Date()-30,end = Sys.Date())
+                             ,column(12,align="center"
+                                     ,actionButton("yield", "畫良率折線圖",style="color: #fff; background-color: #337ab7; border-color: #2e6da4")
+                             )
+            )
+          ),
+          
+          
+          
+          
+          shinydashboard::tabBox(id="tabset",
+                                 width = 10
+                                 ,tabPanel("短期圖", uiOutput("short_layout_UI"),value=1)
+                                 ,tabPanel("長期圖",uiOutput("long_layout_UI"),value=2)
+                                 ,tabPanel("兩倍標準差長期圖",uiOutput("twoStd_layout_UI"),value=3)
+                                 ,tabPanel("Cpk折線圖",uiOutput("cpk_layout_UI"), value=4)
+                                 ,tabPanel("良率折線圖",uiOutput("yield_UI"),value=5)
+                                 ,tabPanel("維護spec資料表",
+                                           fluidPage(
+                                           fluidRow(
+                                             div(class = "login",
+                                                 uiOutput("uiLogin"),
+                                                 textOutput("pass"),
+                                                 tags$head(tags$style("#pass{color: red;"))
+                                             )
+                                             
+                                           ),
+                                           fluidRow(
+
+                                             column(12,
+                                                    div(uiOutput("userPanel")),
+                                                    hr(),
+                                                    div(uiOutput('table'),
+                                                        br(),
+                                                        fluidRow(
+                                                        uiOutput("btn1"),
+                                                        uiOutput("btn2")),
+                                                        hr(),
+                                                        uiOutput("input_table"),
+                                                        uiOutput("output_table")
+                                                        )     
+                                             )      
+                                           )
+                                           )
+                                           
+                                          
+                                           
+                                           )
+                      
+                                 
+          )
+        )
+      )
+    )
+                     )
+    )

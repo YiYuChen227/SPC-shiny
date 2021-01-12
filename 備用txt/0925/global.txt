@@ -1,0 +1,294 @@
+library(shinyFiles)
+library(shiny)
+library(ggplot2)
+library(plotly)
+library(gridExtra)
+library(RMySQL)
+library(DBI)
+library(dplyr)
+library(pool)
+library(rhandsontable)
+library(mailR)
+library(DT)
+library(shinyjs)
+library(rSymPy)
+# lapply(dbListConnections(MySQL()), dbDisconnect)
+###SQL連線資訊
+dbnametest = "spc"
+hosttest = "210.59.249.181"
+porttest = 121
+usernametest = "root"
+passwordtest = "mpi!12345"
+
+#user_db <- read.csv("user_db/user_db.csv")
+
+my_db <- dbConnect(MySQL(),
+                   user = usernametest,
+                   password = passwordtest,
+                   host = hosttest,
+                   port = porttest,
+                   dbname= dbnametest)
+dbGetQuery(my_db, "SET NAMES 'UTF8'")
+
+product <- dbGetQuery(my_db, "SELECT * FROM product")
+product <- product[with(product,order(UpdateDate, decreasing=TRUE)),] #照更新時間排序
+
+type <- dbGetQuery(my_db, "SELECT * FROM type")
+Encoding(measure_all[["TITLE"]])<-"UTF-8"
+Encoding(spec[["TITLE"]])<-"UTF-8"
+spec <- dbGetQuery(my_db ,"SELECT * FROM spec")
+
+dbDisconnect(my_db)
+
+#measure_all <- dbGetQuery(my_db, "SELECT * FROM measure_all")
+
+
+
+# Encoding(spec[["TITLE"]])<-"UTF-8"
+Encoding(type[["TITLE"]])<-"UTF-8"
+
+cpkTable <- read.csv("CPK.csv", header = TRUE, sep = ",")
+
+SQL_warning <- function(type, sProduct, sMold){
+  my_db <- dbConnect(MySQL(),
+                     user = usernametest,
+                     password = passwordtest,
+                     host = hosttest,
+                     port = porttest,
+                     dbname= dbnametest)
+  dbGetQuery(my_db, "SET NAMES 'UTF8'")
+  t <- dbGetQuery(my_db, paste0("SELECT TITLE FROM type WHERE Type = '", type,"'"))
+  w <- dbGetQuery(my_db, paste0("SELECT OperateDate, TITLE, Cpk, Yield, mean FROM measure_all WHERE Product = '", sProduct, "' AND MoldVersion = '", sMold,"'"))
+  s <- dbGetQuery(my_db, paste0("SELECT TITLE, UCL, LCL FROM spec WHERE Product = '", sProduct, "'"))
+  dbDisconnect(my_db)
+  return(list(type=t, warning_all=w, spec=s))
+}
+CpkWarning <- function(warning_all, type){
+  warning_cpk <- warning_all[,c("OperateDate","TITLE", "Cpk")]
+  warning_cpk <- warning_cpk[with(warning_cpk,order(OperateDate, decreasing=TRUE)),]
+  warning_cpk <- warning_cpk[which(warning_cpk$OperateDate==warning_cpk$OperateDate[1]),]
+  warning_cpk <- merge(x = warning_cpk, y = type, by = "TITLE", all.y = TRUE)
+  warning_cpk <- warning_cpk[which(warning_cpk$Cpk < 0.4),]
+  warning_cpk <- warning_cpk[!duplicated(warning_cpk$TITLE), ]
+  return(warning_cpk)
+}
+
+YieldWarning <- function(warning_all, type){
+  warning_yield <- warning_all[,c("OperateDate","TITLE", "Yield")]
+  warning_yield <- warning_yield[with(warning_yield,order(OperateDate, decreasing=TRUE)),]
+  warning_yield <- warning_yield[which(warning_yield$OperateDate==warning_yield$OperateDate[1]),]
+  warning_yield <- merge(x = warning_yield, y = type, by = "TITLE", all.y = TRUE)
+  warning_yield <- warning_yield[which(warning_yield$Yield < 1),]
+  warning_yield <- warning_yield[!duplicated(warning_yield$TITLE), ]
+  return(warning_yield)
+}
+
+TargetWarning <- function(warning_all, spec){
+  warning_target <- warning_all[,c("OperateDate","TITLE", "mean")]
+  warning_target <- warning_target[with(warning_target,order(OperateDate, decreasing=TRUE)),]
+  warning_target <- warning_target[which(warning_target$OperateDate==warning_target$OperateDate[1]),]
+  warning_target <- merge(x = warning_target, y = spec, by = "TITLE")
+  warning_target <- warning_target[complete.cases(warning_target), ]
+  temp <- vector()
+  for(i in c(1:nrow(warning_target))){
+    if((warning_target$mean[i]>warning_target$UCL[i])||(warning_target$mean[i]<warning_target$LCL[i])){
+      temp <- c(temp,i)
+    }
+  }
+  warning_target <- warning_target[!duplicated(warning_target$TITLE), ]
+  return(warning_target[temp,1:3])
+}
+
+SQL_short <- function(sProduct, sMold){
+  my_db <- dbConnect(MySQL(),
+                     user = usernametest,
+                     password = passwordtest,
+                     host = hosttest,
+                     port = porttest,
+                     dbname= dbnametest)
+  dbGetQuery(my_db, "SET NAMES 'UTF8'")
+  SQL1 <- paste0("SELECT OperateDate,TITLE,mean,std,Cpk FROM measure_all WHERE Product = '", sProduct, "' AND MoldVersion = '", sMold, "'")
+  sh <- dbGetQuery(my_db, SQL1)
+  sp <- dbGetQuery(my_db, paste0("SELECT * FROM spec WHERE Product = '", sProduct, "'"))
+  dbDisconnect(my_db)
+  return(list(short=sh, spec=sp))
+}
+
+short_control_chart <- function(sTitle,short,spec,plot_num){
+  short <- short[which(short$TITLE==sTitle),]
+  short <- short[with(short,order(OperateDate, decreasing=TRUE)),]
+  short <- short[!duplicated(short$OperateDate), ]
+  short <- short[1:10,]
+  short$mean[short$mean==0]<-NA
+  short <-na.omit(short)
+  spec <- spec[which(spec$TITLE==sTitle),]
+  incProgress(1/plot_num)
+  renderPlotly({
+    ggplotly(ggplot(short, aes(x = OperateDate, y = mean, group = 1,showlegend = F)) + geom_line() + geom_point() +
+               theme(axis.text.x = element_text(angle = 90, vjust = 1.0, hjust = 1.0)) +
+               geom_hline(aes(yintercept=spec$USL), colour="#4ECDC4") +
+               geom_hline(aes(yintercept=spec$LSL), colour="#4ECDC4") +
+               geom_hline(aes(yintercept=spec$UCL), colour="#C44D58") +
+               geom_hline(aes(yintercept=spec$LCL), colour="#C44D58") +
+               ggtitle(sTitle))%>%layout(margin=list(b=200))
+  })
+}
+
+SQL_spec <- function(sProduct, sTitle){
+  my_db <- dbConnect(MySQL(),
+                     user = usernametest,
+                     password = passwordtest,
+                     host = hosttest,
+                     port = porttest,
+                     dbname= dbnametest)
+  dbGetQuery(my_db, "SET NAMES 'UTF8'")
+  df<-dbGetQuery(my_db, paste0("SELECT * FROM spec WHERE Product = '", sProduct, "'"))
+  df<-df[which(df$TITLE==sTitle),]
+  dbDisconnect(my_db)
+  return(df)
+}
+
+SQL_long_mean <- function(sProduct, sMold, sTitle, date){
+  my_db <- dbConnect(MySQL(),
+                     user = usernametest,
+                     password = passwordtest,
+                     host = hosttest,
+                     port = porttest,
+                     dbname= dbnametest)
+  dbGetQuery(my_db, "SET NAMES 'UTF8'")
+  SQL1 <- paste0("SELECT OperateDate,TITLE,mean,std,Cpk,Yield FROM measure_all WHERE Product = '", sProduct, "' AND MoldVersion = '", sMold, "'")
+  df <- dbGetQuery(my_db, SQL1)
+  df <- df[which(df$TITLE==sTitle),]
+  df <- df[(df$OperateDate > paste(as.character(date[1]),"00:00:00"))&(df$OperateDate < paste(as.character(date[2]),"23:59:59")),]
+  df$mean[df$mean==0]<-NA
+  df <-na.omit(df)
+  dbDisconnect(my_db)
+  return(df)
+}
+
+SQL_long_cpk <- function(sProduct, sMold, sTitle, date){
+  my_db <- dbConnect(MySQL(),
+                     user = usernametest,
+                     password = passwordtest,
+                     host = hosttest,
+                     port = porttest,
+                     dbname= dbnametest)
+  dbGetQuery(my_db, "SET NAMES 'UTF8'")
+  SQL1 <- paste0("SELECT OperateDate,TITLE,mean,std,Cpk,Yield FROM measure_all WHERE Product = '", sProduct, "' AND MoldVersion = '", sMold, "'")
+  df <- dbGetQuery(my_db, SQL1)
+  df <- df[which(df$TITLE==sTitle),]
+  df <- df[(df$OperateDate > paste(as.character(date[1]),"00:00:00"))&(df$OperateDate < paste(as.character(date[2]),"23:59:59")),]
+  df$Cpk[df$Cpk==0.00]<-NA
+  df <-na.omit(df)
+  dbDisconnect(my_db)
+  return(df)
+}
+
+SQL_long_yield <- function(sProduct, sMold, sTitle, date){
+  my_db <- dbConnect(MySQL(),
+                     user = usernametest,
+                     password = passwordtest,
+                     host = hosttest,
+                     port = porttest,
+                     dbname= dbnametest)
+  dbGetQuery(my_db, "SET NAMES 'UTF8'")
+  SQL1 <- paste0("SELECT OperateDate,TITLE,mean,std,Cpk,Yield FROM measure_all WHERE Product = '", sProduct, "' AND MoldVersion = '", sMold, "'")
+  df <- dbGetQuery(my_db, SQL1)
+  df <- df[which(df$TITLE==sTitle),]
+  df <- df[(df$OperateDate > paste(as.character(date[1]),"00:00:00"))&(df$OperateDate < paste(as.character(date[2]),"23:59:59")),]
+  df$Yield[df$Yield==0.0]<-NA
+  df <-na.omit(df)
+  dbDisconnect(my_db)
+  return(df)
+}
+
+
+long_control_chart <- function(input_sProduct, input_sMold, input_sTitle1, input_date1){
+  long <- SQL_long_mean(input_sProduct, input_sMold, input_sTitle1, input_date1)
+  spec <- SQL_spec(input_sProduct, input_sTitle1)
+
+  #renderPlotly({
+  pl<-plot_ly(mode="lines+markers",type = "scatter",showlegend=FALSE,hoverinfo="text",
+              text=paste("OperateDate:",long$OperateDate,"<br>","mean:",long$mean,"<br>","Cpk:",long$Cpk)
+              )%>%
+    add_trace(x=long$OperateDate,y=long$mean,line=list(color='black',width=2),marker=list(color="black",size=7))%>%
+    add_lines(x=long$OperateDate,y = spec$USL, line = list(color="#4ECDC4"), name = "USL") %>%
+    add_lines(x=long$OperateDate,y = spec$LSL, line = list(color="#4ECDC4"), name = "LSL")%>%
+    add_lines(x=long$OperateDate,y = spec$UCL, line = list(color="#C44D58"), name = "UCL") %>%
+    add_lines(x=long$OperateDate,y = spec$LCL, line = list(color="#C44D58"), name = "LCL")%>%
+    layout(xaxis = list(range=c(min(long$OperateDate),max(long$OperateDate))))%>%
+    layout(xaxis = list(title="OperateDate"),
+           yaxis = list(title="mean"))
+    
+  return(pl)
+  # })
+}
+
+
+twoStd_control_chart <- function(input_sProduct, input_sMold, input_sTitle2, input_date2){
+  long <- SQL_long_mean(input_sProduct, input_sMold, input_sTitle2, input_date2)
+  spec <- SQL_spec(input_sProduct, input_sTitle2)
+  
+  # pl<-plot_ly(mode="lines+markers",type = "scatter",showlegend=FALSE,hoverinfo="text",
+  #             error_y = ~list(value = aes(ymin=mean-2*std, ymax=mean+2*std),
+  #                             color = '#000000'),
+  #             text=paste("OperateDate:",long$OperateDate,"<br>","mean:",long$mean,"<br>","Cpk:",long$Cpk)
+  # )%>%
+  #   add_trace(x=long$OperateDate,y=long$mean,line=list(color='black',width=2),marker=list(color="black",size=7))%>%
+  #   add_lines(x=long$OperateDate,y = spec$USL, line = list(color="#4ECDC4"), name = "USL") %>%
+  #   add_lines(x=long$OperateDate,y = spec$LSL, line = list(color="#4ECDC4"), name = "LSL")%>%
+  #   add_lines(x=long$OperateDate,y = spec$UCL, line = list(color="#C44D58"), name = "UCL") %>%
+  #   add_lines(x=long$OperateDate,y = spec$LCL, line = list(color="#C44D58"), name = "LCL")%>%
+  #   layout(xaxis = list(range=c(min(long$OperateDate),max(long$OperateDate))))%>%
+  #   layout(xaxis = list(title="OperateDate"),
+  #          yaxis = list(title="mean"))
+  # 
+  # return(pl)
+  # renderPlotly({
+  ggplotly(ggplot(long, aes(x = OperateDate, y = mean, group = 1)) + geom_line() + geom_point(aes(text=sprintf('Cpk: %s', Cpk))) +
+             theme(axis.text.x = element_text(angle = 90, vjust = 1.0, hjust = 1.0)) +
+             geom_errorbar(aes(ymin=mean-2*std, ymax=mean+2*std)) +
+             geom_hline(aes(yintercept=spec$USL), colour="#4ECDC4") +
+             geom_hline(aes(yintercept=spec$LSL), colour="#4ECDC4") +
+             geom_hline(aes(yintercept=spec$UCL), colour="#C44D58") +
+             geom_hline(aes(yintercept=spec$LCL), colour="#C44D58"))%>%layout(margin=list(b=200))
+  # })
+}
+
+cpk_control_chart <- function(input_sProduct, input_sMold, input_sTitle3, input_date3){
+  long <- SQL_long_cpk(input_sProduct, input_sMold, input_sTitle3, input_date3)
+  spec <- SQL_spec(input_sProduct, input_sTitle3)
+  
+  pl<-plot_ly(mode="lines+markers",type = "scatter",showlegend=FALSE,hoverinfo="text",
+              text=paste("OperateDate:",long$OperateDate,"<br>","Cpk:",long$Cpk)
+  )%>%
+    add_trace(x=long$OperateDate,y=long$Cpk,line=list(color='black',width=2),marker=list(color="black",size=7))%>%
+    add_lines(x=long$OperateDate,y = 1.33, line = list(color="#4ECDC4")) %>%
+    layout(xaxis = list(range=c(min(long$OperateDate),max(long$OperateDate))))%>%
+    layout(xaxis = list(title="OperateDate"),
+           yaxis = list(title="Cpk"))
+  
+  return(pl)
+  
+  # renderPlotly({
+  # ggplotly(ggplot(long, aes(x = OperateDate, y = Cpk, group = 1)) + geom_line() + geom_point() +
+  #            theme(axis.text.x = element_text(angle = 90, vjust = 1.0, hjust = 1.0)) +
+  #            geom_hline(aes(yintercept=1.33), colour="#4ECDC4"))%>%layout(margin=list(b=200))
+  # })
+}
+
+yield_control_chart <- function(input_sProduct, input_sMold, input_sTitle4, input_date4){
+  long <- SQL_long_yield(input_sProduct, input_sMold, input_sTitle4, input_date4)
+  spec <- SQL_spec(input_sProduct, input_sTitle4)
+  # renderPlotly({
+  ggplotly(ggplot(long, aes(x = OperateDate, y = Yield, group = 1)) + geom_line() + geom_point() +
+             theme(axis.text.x = element_text(angle = 90, vjust = 1.0, hjust = 1.0)) +
+             geom_hline(aes(yintercept=1), colour="#4ECDC4"))%>%layout(margin=list(b=200))
+  # })
+}
+
+
+# onStop(function() {
+#   print("Close DB connection...........")
+#   poolClose(my_db)
+# })
